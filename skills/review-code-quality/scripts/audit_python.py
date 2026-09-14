@@ -1381,6 +1381,44 @@ def _check_functions(
             )
 
 
+def _missing_public_annotations(function: FunctionInfo) -> list[str]:
+    node = function.node
+    parameters = [*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs]
+    if parameters and parameters[0].arg in {"self", "cls"}:
+        parameters = parameters[1:]
+    missing = [item.arg for item in parameters if item.annotation is None]
+    variadics = [item for item in (node.args.vararg, node.args.kwarg) if item is not None]
+    missing.extend(item.arg for item in variadics if item.annotation is None)
+    if node.returns is None:
+        missing.append("return")
+    return missing
+
+
+def _check_public_annotations(
+    context: ReviewContext, functions: Sequence[FunctionInfo]
+) -> None:
+    # quality: ignore[POT02] - functions comes from an AST capped at MAX_AST_NODES
+    for function in functions:
+        if not _requires_docstring(context.path, function):
+            continue
+        missing = _missing_public_annotations(function)
+        if not missing:
+            continue
+        context.report(
+            code="PY004",
+            severity="warning",
+            node=function.node,
+            message=(
+                f"public function {function.qualified_name} lacks type annotations "
+                f"for {', '.join(missing)}"
+            ),
+            remedy=(
+                "Annotate every public parameter and return value, then run the "
+                "project's configured type checker."
+            ),
+        )
+
+
 def _report_missing_docstring(
     context: ReviewContext, node: ast.AST, subject: str
 ) -> None:
@@ -2158,6 +2196,26 @@ def _check_module_scope(context: ReviewContext) -> None:
         )
 
 
+def _check_import_safety(context: ReviewContext) -> None:
+    calls = [
+        node
+        for node in context.tree.body
+        if isinstance(node, ast.Expr) and isinstance(node.value, ast.Call)
+    ]
+    # quality: ignore[POT02] - module statements are capped by MAX_AST_NODES
+    for node in calls:
+        context.report(
+            code="PY001",
+            severity="warning",
+            node=node,
+            message="module executes a call during import",
+            remedy=(
+                "Move executable workflow into main() and call it under an "
+                "if __name__ == '__main__' guard."
+            ),
+        )
+
+
 def _source_boundary_finding(source: str, path: Path) -> Finding | None:
     if len(source) > MAX_SOURCE_BYTES:
         return _limit_finding(
@@ -2201,6 +2259,7 @@ def _parse_module(source: str, path: Path, findings: list[Finding]) -> ast.Modul
 
 def _run_checks(context: ReviewContext, functions: Sequence[FunctionInfo]) -> None:
     _check_functions(context, functions)
+    _check_public_annotations(context, functions)
     _check_docstrings(context, functions)
     _check_nesting(context, functions)
     _check_loops(context)
@@ -2212,6 +2271,7 @@ def _run_checks(context: ReviewContext, functions: Sequence[FunctionInfo]) -> No
     _check_data_clumps(context, functions)
     _check_duplicate_bodies(context, functions)
     _check_module_scope(context)
+    _check_import_safety(context)
 
 
 def analyze_source(

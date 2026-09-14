@@ -25,6 +25,7 @@ SPEC = importlib.util.spec_from_file_location("audit_python", AUDITOR_PATH)
 assert SPEC is not None and SPEC.loader is not None
 AUDITOR = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = AUDITOR
+# quality: ignore[PY001] - test collection must load the auditor module under test
 SPEC.loader.exec_module(AUDITOR)
 
 
@@ -342,11 +343,11 @@ class SolidPrincipleTests(unittest.TestCase):
     def test_reports_concrete_method_disabled_by_subclass(self) -> None:
         source = """
 class Writer:
-    def write(self, payload):
+    def write(self, payload: object) -> object:
         return payload
 
 class ReadOnlyWriter(Writer):
-    def write(self, payload):
+    def write(self, payload: object) -> object:
         raise NotImplementedError
 """
         findings = self._solid_findings(source)
@@ -434,6 +435,57 @@ class ExternalService(ExternalBase):
         return key
 """
         self.assertEqual(self._solid_findings(source), [])
+
+
+class PythonPracticeTests(unittest.TestCase):
+    """Cover high-confidence maintainable-Python practices."""
+
+    def test_reports_bare_module_call_but_accepts_main_guard(self) -> None:
+        unsafe = "def connect():\n    return None\n\nconnect()\n"
+        safe = (
+            "def main() -> None:\n    connect()\n\n"
+            "if __name__ == '__main__':\n    main()\n"
+        )
+        self.assertIn("PY001", codes(unsafe))
+        self.assertNotIn("PY001", codes(safe))
+
+    def test_reports_missing_public_interface_annotations(self) -> None:
+        source = """
+def transform(value: str, limit=10):
+    return value[:limit]
+
+class Formatter:
+    def render(self, value: str):
+        return value
+"""
+        findings = AUDITOR.analyze_source(source, pathlib.Path("typed.py"))
+        messages = [item.message for item in findings if item.code == "PY004"]
+        self.assertEqual(len(messages), 2)
+        self.assertTrue(
+            any("limit" in message and "return" in message for message in messages)
+        )
+
+    def test_accepts_complete_annotations_and_exempt_surfaces(self) -> None:
+        source = """
+from typing import overload
+
+def transform(value: str, limit: int = 10) -> str:
+    return value[:limit]
+
+def _helper(value):
+    return value
+
+@overload
+def parse(value): ...
+
+class Formatter:
+    def render(self, value: str) -> str:
+        return value
+
+    def __repr__(self):
+        return "Formatter()"
+"""
+        self.assertNotIn("PY004", codes(source))
 
 
 class DocstringTests(unittest.TestCase):
@@ -989,14 +1041,14 @@ class HookIntegrationTests(unittest.TestCase):
 class Writer:
     """Write payloads."""
 
-    def write(self, payload):
+    def write(self, payload: object) -> object:
         """Return the written payload."""
         return payload
 
 class ReadOnlyWriter(Writer):
     """Represent a restricted writer."""
 
-    def write(self, payload):
+    def write(self, payload: object) -> object:
         """Return the written payload."""
         return payload
 '''
