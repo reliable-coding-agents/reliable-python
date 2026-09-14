@@ -983,6 +983,58 @@ class HookIntegrationTests(unittest.TestCase):
             self.assertEqual(payload["decision"], "block")
             self.assertIn("POT08", payload["reason"])
 
+    def test_stop_hook_treats_solid_findings_as_advisory(self) -> None:
+        baseline = '''"""Module."""
+
+class Writer:
+    """Write payloads."""
+
+    def write(self, payload):
+        """Return the written payload."""
+        return payload
+
+class ReadOnlyWriter(Writer):
+    """Represent a restricted writer."""
+
+    def write(self, payload):
+        """Return the written payload."""
+        return payload
+'''
+        prefix, suffix = baseline.rsplit("        return payload\n", 1)
+        incompatible = prefix + "        raise NotImplementedError\n" + suffix
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            subprocess.run(
+                ["git", "config", "user.email", "test@example.com"],
+                cwd=root,
+                check=True,
+            )
+            subprocess.run(["git", "config", "user.name", "Test"], cwd=root, check=True)
+            target = root / "sample.py"
+            target.write_text(baseline, encoding="utf-8")
+            subprocess.run(["git", "add", "sample.py"], cwd=root, check=True)
+            subprocess.run(["git", "commit", "-qm", "baseline"], cwd=root, check=True)
+            target.write_text(incompatible, encoding="utf-8")
+            direct = subprocess.run(
+                [sys.executable, str(AUDITOR_PATH), "--git-diff", "--format", "json",
+                 "--fail-on", "none"],
+                cwd=root,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            direct_codes = {item["code"] for item in json.loads(direct.stdout)["findings"]}
+            hook_input = json.dumps({"cwd": str(root), "stop_hook_active": False})
+            advisory_payload = self._run_stop_hook(hook_input, {})
+            target.write_text(incompatible + "\nvalue = eval('1')\n", encoding="utf-8")
+            blocking_payload = self._run_stop_hook(hook_input, {})
+        self.assertIn("SOLID03", direct_codes)
+        self.assertEqual(advisory_payload, {})
+        self.assertEqual(blocking_payload["decision"], "block")
+        self.assertIn("POT08", blocking_payload["reason"])
+        self.assertNotIn("SOLID03", blocking_payload["reason"])
+
     def test_stop_hook_honors_the_docstring_style_environment_variable(self) -> None:
         google_source = (
             '"""Module."""\n\n\ndef public(value):\n'
