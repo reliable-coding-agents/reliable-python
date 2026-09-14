@@ -329,6 +329,113 @@ def new():
                     tuple(AUDITOR._iter_python_files([root]))
 
 
+class SolidPrincipleTests(unittest.TestCase):
+    """Cover high-confidence Python Liskov-substitution findings."""
+
+    def _solid_findings(self, source: str) -> list:
+        return [
+            item
+            for item in AUDITOR.analyze_source(source, pathlib.Path("solid.py"))
+            if item.code == "SOLID03"
+        ]
+
+    def test_reports_concrete_method_disabled_by_subclass(self) -> None:
+        source = """
+class Writer:
+    def write(self, payload):
+        return payload
+
+class ReadOnlyWriter(Writer):
+    def write(self, payload):
+        raise NotImplementedError
+"""
+        findings = self._solid_findings(source)
+        self.assertEqual(len(findings), 1)
+        self.assertIn("NotImplementedError", findings[0].message)
+
+    def test_reports_sync_property_and_signature_incompatibilities(self) -> None:
+        source = """
+class Service:
+    def fetch(self, key, timeout=None):
+        return key
+
+    def dispatch(self, *items, **options):
+        return items
+
+    @property
+    def status(self):
+        return "ready"
+
+class NarrowService(Service):
+    async def fetch(self, key, timeout, region):
+        return key
+
+    def dispatch(self, item):
+        return item
+
+    def status(self):
+        return "ready"
+"""
+        findings = self._solid_findings(source)
+        self.assertEqual(len(findings), 3)
+        message = "\n".join(item.message for item in findings)
+        self.assertIn("synchronous", message)
+        self.assertIn("property", message)
+        self.assertIn("variadic", message)
+        self.assertIn("required parameter region", message)
+
+    def test_reports_removed_accepted_keyword_and_positional_calls(self) -> None:
+        source = """
+class Parser:
+    def parse(self, source, mode="strict", *, encoding="utf-8"):
+        return source
+
+class NarrowParser(Parser):
+    def parse(self, source, *, mode="strict"):
+        return source
+"""
+        findings = self._solid_findings(source)
+        self.assertEqual(len(findings), 1)
+        self.assertIn("positional", findings[0].message)
+        self.assertIn("keyword encoding", findings[0].message)
+
+    def test_accepts_compatible_and_abstract_overrides(self) -> None:
+        source = """
+from abc import abstractmethod
+
+class Service:
+    @abstractmethod
+    def required(self, key):
+        raise NotImplementedError
+
+    def stub(self, key): ...
+
+    def fetch(self, key, timeout=None):
+        return key
+
+    def _internal(self):
+        return None
+
+class WideService(Service):
+    def required(self, key):
+        return key
+
+    def stub(self, key):
+        return key
+
+    def fetch(self, key, timeout=None, *args, **kwargs):
+        return key
+
+    def _internal(self):
+        raise NotImplementedError
+
+class ExternalService(ExternalBase):
+    def fetch(self, key):
+        return key
+"""
+        self.assertEqual(self._solid_findings(source), [])
+
+
 class DocstringTests(unittest.TestCase):
     """Cover the DOC01-DOC03 documentation convention rules."""
 

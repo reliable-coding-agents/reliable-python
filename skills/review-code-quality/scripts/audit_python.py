@@ -147,6 +147,13 @@ SUPPRESSION_RE = re.compile(
 )
 HUNK_RE = re.compile(r"@@\s+-\d+(?:,\d+)?\s+\+(\d+)(?:,(\d+))?\s+@@")
 SEVERITY_RANK = MappingProxyType({"note": 0, "warning": 1, "error": 2})
+SUPPORTED_METHOD_DECORATORS = frozenset({
+    "abstractmethod",
+    "classmethod",
+    "property",
+    "staticmethod",
+})
+FunctionNode = ast.FunctionDef | ast.AsyncFunctionDef
 
 
 class AuditError(ValueError):
@@ -238,6 +245,17 @@ class DiffSelection:
     root: Path
     paths: tuple[Path, ...]
     changed_lines: dict[Path, tuple[tuple[int, int], ...]]
+
+
+@dataclass(frozen=True)
+class _SignatureShape:
+    positional_count: int
+    required_positional: int
+    keyword_names: frozenset[str]
+    optional_names: frozenset[str]
+    required_names: frozenset[str]
+    has_varargs: bool
+    has_kwargs: bool
 
 
 class SourceLines(list[str]):
@@ -1771,6 +1789,168 @@ def _is_forwarder(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
     return isinstance(value, ast.Call) and isinstance(value.func, ast.Attribute)
 
 
+def _class_methods(node: ast.ClassDef) -> dict[str, FunctionNode]:
+    return {
+        item.name: item
+        for item in node.body
+        if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+
+
+def _method_decorators(node: FunctionNode) -> frozenset[str]:
+    names = [
+        _call_name(item.func) if isinstance(item, ast.Call) else _call_name(item)
+        for item in node.decorator_list
+    ]
+    return frozenset(name.split(".")[-1] for name in names)
+
+
+def _method_kind(node: FunctionNode) -> str | None:
+    decorators = _method_decorators(node)
+    if decorators - SUPPORTED_METHOD_DECORATORS:
+        return None
+    kinds = decorators & {"classmethod", "property", "staticmethod"}
+    if len(kinds) > 1:
+        return None
+    return next(iter(kinds), "instance")
+
+
+def _raises_not_implemented(node: FunctionNode) -> bool:
+    body = [item for item in node.body if not _is_docstring_statement(item)]
+    if len(body) != 1 or not isinstance(body[0], ast.Raise):
+        return False
+    exception = body[0].exc
+    target = exception.func if isinstance(exception, ast.Call) else exception
+    return isinstance(target, ast.Name) and target.id == "NotImplementedError"
+
+
+def _concrete_method(node: FunctionNode) -> bool:
+    decorators = _method_decorators(node)
+    return (
+        "abstractmethod" not in decorators
+        and not _is_stub_body(node)
+        and not _raises_not_implemented(node)
+    )
+
+
+def _signature_shape(arguments: ast.arguments, method_kind: str) -> _SignatureShape:
+    positional = [*arguments.posonlyargs, *arguments.args]
+    required_until = len(positional) - len(arguments.defaults)
+    pairs = [(item, index < required_until) for index, item in enumerate(positional)]
+    positional_only = pairs[:len(arguments.posonlyargs)]
+    named = pairs[len(arguments.posonlyargs):]
+    if method_kind != "staticmethod":
+        if positional_only:
+            positional_only = positional_only[1:]
+        elif named:
+            named = named[1:]
+    keyword_only = list(zip(arguments.kwonlyargs, arguments.kw_defaults))
+    keyword_names = {item.arg for item, _ in named}
+    keyword_names.update(item.arg for item, _ in keyword_only)
+    optional_names = {item.arg for item, required in named if not required}
+    optional_names.update(item.arg for item, default in keyword_only if default is not None)
+    required_names = {item.arg for item, required in named if required}
+    required_names.update(item.arg for item, default in keyword_only if default is None)
+    return _SignatureShape(
+        positional_count=len(positional_only) + len(named),
+        required_positional=sum(required for _, required in [*positional_only, *named]),
+        keyword_names=frozenset(keyword_names),
+        optional_names=frozenset(optional_names),
+        required_names=frozenset(required_names),
+        has_varargs=arguments.vararg is not None,
+        has_kwargs=arguments.kwarg is not None,
+    )
+
+
+def _signature_incompatibilities(base: _SignatureShape, override: _SignatureShape) -> list[str]:
+    reasons: list[str] = []
+    if base.has_varargs and not override.has_varargs:
+        reasons.append("removes variadic positional acceptance")
+    if base.has_kwargs and not override.has_kwargs:
+        reasons.append("removes variadic keyword acceptance")
+    if not override.has_varargs and override.positional_count < base.positional_count:
+        reasons.append("accepts fewer positional arguments")
+    if override.required_positional > base.required_positional:
+        reasons.append("requires more positional arguments")
+    if not override.has_kwargs:
+        missing = base.keyword_names - override.keyword_names
+        reasons.extend(f"removes accepted keyword {name}" for name in sorted(missing))
+    newly_required = base.optional_names & override.required_names
+    reasons.extend(f"makes optional parameter {name} required" for name in sorted(newly_required))
+    added_required = override.required_names - base.keyword_names
+    reasons.extend(f"adds required parameter {name}" for name in sorted(added_required))
+    return reasons
+
+
+def _override_incompatibilities(base: FunctionNode, override: FunctionNode) -> list[str]:
+    base_kind = _method_kind(base)
+    override_kind = _method_kind(override)
+    if base_kind is None or override_kind is None:
+        return []
+    reasons: list[str] = []
+    if base_kind != override_kind:
+        reasons.append(f"changes {base_kind} method to {override_kind} method")
+    base_async = isinstance(base, ast.AsyncFunctionDef)
+    override_async = isinstance(override, ast.AsyncFunctionDef)
+    if base_async != override_async:
+        before = "asynchronous" if base_async else "synchronous"
+        after = "asynchronous" if override_async else "synchronous"
+        reasons.append(f"changes {before} method to {after} method")
+    if _concrete_method(base) and _raises_not_implemented(override):
+        reasons.append("replaces concrete behavior with NotImplementedError")
+    if base_kind == override_kind:
+        base_shape = _signature_shape(base.args, base_kind)
+        override_shape = _signature_shape(override.args, override_kind)
+        reasons.extend(_signature_incompatibilities(base_shape, override_shape))
+    return reasons
+
+
+def _local_base_method(
+    classes: Mapping[str, ast.ClassDef], subclass: ast.ClassDef, name: str
+) -> tuple[ast.ClassDef, FunctionNode] | None:
+    bases = [classes[item.id] for item in subclass.bases
+             if isinstance(item, ast.Name) and item.id in classes]
+    candidates = [
+        (base, _class_methods(base)[name])
+        for base in bases
+        if name in _class_methods(base)
+    ]
+    return candidates[0] if candidates else None
+
+
+def _check_solid(context: ReviewContext) -> None:
+    classes = {
+        item.name: item for item in context.tree.body if isinstance(item, ast.ClassDef)
+    }
+    # quality: ignore[POT02] - top-level classes are capped by MAX_AST_NODES
+    for subclass in classes.values():
+        overrides = _class_methods(subclass)
+        # quality: ignore[POT02] - class methods are capped by MAX_AST_NODES
+        for name, override in overrides.items():
+            if name.startswith("_"):
+                continue
+            inherited = _local_base_method(classes, subclass, name)
+            if inherited is None:
+                continue
+            base_class, base = inherited
+            reasons = _override_incompatibilities(base, override)
+            if not reasons:
+                continue
+            context.report(
+                code="SOLID03",
+                severity="warning",
+                node=override,
+                message=(
+                    f"override {subclass.name}.{name} is not substitutable for "
+                    f"{base_class.name}.{name}: {'; '.join(reasons)}"
+                ),
+                remedy=(
+                    "Preserve the inherited call contract, or replace inheritance "
+                    "with composition or a narrower protocol."
+                ),
+            )
+
+
 def _check_conditional(context: ReviewContext, node: ast.AST) -> None:
     parent = context.parents.get(node)
     is_elif = (
@@ -2027,6 +2207,7 @@ def _run_checks(context: ReviewContext, functions: Sequence[FunctionInfo]) -> No
     _check_exceptions_and_dynamic_code(context)
     _check_indirection_and_privacy(context)
     _check_classes_and_conditionals(context)
+    _check_solid(context)
     _check_dead_code(context)
     _check_data_clumps(context, functions)
     _check_duplicate_bodies(context, functions)
