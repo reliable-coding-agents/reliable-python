@@ -1,6 +1,6 @@
 {
-  "name": "jihohan-marketplace",
-  "description": "Jiho Han's Claude Code plugins",
+  "name": "reliable-coding-agents",
+  "description": "Reliable Coding Agents plugins",
   "owner": {
     "name": "Jiho Han",
     "email": "jihohan@simplatform.com"
@@ -9,7 +9,7 @@
     {
       "name": "reliable-python",
       "description": "Guide and audit Python changes against NASA/JPL's Power of Ten rules and the Refactoring.Guru code-smell catalog",
-      "version": "0.3.0",
+      "version": "0.3.1",
       "source": "./",
       "author": {
         "name": "Jiho Han",

@@ -23,6 +23,7 @@ VALID_GATE_LEVELS = frozenset({"all", "errors", "off"})
 VALID_DOCSTRING_STYLES = frozenset({"numpy", "google", "rest", "any"})
 DEFAULT_DOCSTRING_STYLE = "numpy"
 DOCSTYLE_ENV_VAR = "RELIABLE_PYTHON_DOCSTYLE"
+NON_GIT_ERROR = "quality audit: --git-diff requires a Git working tree"
 
 
 # quality: ignore[POT05] - module checks JSON, enum, process, timeout, and payload boundaries
@@ -143,8 +144,8 @@ def main() -> int:
     Returns
     -------
     int
-        Always ``0``. Infrastructure failures fail open with an explanatory
-        message rather than blocking the turn, and a second consecutive stop is
+        Always ``0``. Non-Git directories are ignored, infrastructure failures
+        fail open with an explanatory message, and a second consecutive stop is
         always allowed so the hook cannot loop.
     """
     hook_input = _read_input()
@@ -163,6 +164,8 @@ def main() -> int:
     notice = _style_notice()
     cwd = pathlib.Path(str(hook_input.get("cwd", pathlib.Path.cwd())))
     payload, error = _run_audit(cwd, _style_arguments())
+    if error == NON_GIT_ERROR:
+        return _emit({})
     if error or payload is None:
         skipped = {"systemMessage": f"Reliable-code gate skipped: {error}"}
         return _emit(_with_notice(skipped, notice))
