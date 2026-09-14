@@ -247,5 +247,5 @@ claude plugin validate .
 There is no separate linter or type checker configured; the checker and the
 unittest suite are the whole validation story.
 
-[issues]: https://github.com/sciencejiho/reliable-python/issues
-[pulls]: https://github.com/sciencejiho/reliable-python/pulls
+[issues]: https://github.com/reliable-coding-agents/reliable-python/issues
+[pulls]: https://github.com/reliable-coding-agents/reliable-python/pulls

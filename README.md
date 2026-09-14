@@ -29,15 +29,15 @@ It combines three bodies of guidance:
 **Claude Code**
 
 ```sh
-claude plugin marketplace add sciencejiho/reliable-python
-claude plugin install reliable-python@jihohan-marketplace
+claude plugin marketplace add reliable-coding-agents/marketplace
+claude plugin install reliable-python@reliable-coding-agents
 ```
 
 **Codex**
 
 ```sh
-codex plugin marketplace add sciencejiho/reliable-python
-codex plugin add reliable-python@jihohan-marketplace
+codex plugin marketplace add reliable-coding-agents/marketplace
+codex plugin add reliable-python@reliable-coding-agents
 ```
 
 Start a new session after installing, then review and trust the plugin's command
@@ -66,6 +66,9 @@ demo.py:7: error POT02: while loop has no mechanically visible preset upper boun
   remedy: Use a named maximum and fail explicitly when it is exhausted.
 quality audit: 1 error(s), 2 warning(s)
 ```
+
+Outside a Git working tree, the global completion hook exits silently because
+there is no changed-line scope to audit.
 
 The agent doesn't get to stop there. It gets one more pass:
 
@@ -324,7 +327,7 @@ For Codex, add this repository as a local marketplace and install its entry:
 
 ```sh
 codex plugin marketplace add /absolute/path/to/reliable-python
-codex plugin add reliable-python@jihohan-marketplace
+codex plugin add reliable-python@reliable-coding-agents
 ```
 
 Start a new session after installing. Both hosts require you to review and trust
