@@ -383,7 +383,7 @@ class NarrowService(Service):
         self.assertIn("synchronous", message)
         self.assertIn("property", message)
         self.assertIn("variadic", message)
-        self.assertIn("required parameter region", message)
+        self.assertIn("requires more arguments", message)
 
     def test_reports_removed_accepted_keyword_and_positional_calls(self) -> None:
         source = """
@@ -414,6 +414,12 @@ class Service:
     def fetch(self, key, timeout=None):
         return key
 
+    def select(self, *, key):
+        return key
+
+    def locate(self, key, /):
+        return key
+
     def _internal(self):
         return None
 
@@ -425,6 +431,12 @@ class WideService(Service):
         return key
 
     def fetch(self, key, timeout=None, *args, **kwargs):
+        return key
+
+    def select(self, key):
+        return key
+
+    def locate(self, key):
         return key
 
     def _internal(self):
@@ -486,6 +498,21 @@ class Formatter:
         return "Formatter()"
 """
         self.assertNotIn("PY004", codes(source))
+
+    def test_requires_annotation_for_non_receiver_named_self(self) -> None:
+        source = """
+def transform(self) -> str:
+    return str(self)
+
+class Formatter:
+    @staticmethod
+    def render(self) -> str:
+        return str(self)
+"""
+        findings = AUDITOR.analyze_source(source, pathlib.Path("receivers.py"))
+        messages = [item.message for item in findings if item.code == "PY004"]
+        self.assertEqual(len(messages), 2)
+        self.assertTrue(all("self" in message for message in messages))
 
 
 class DocstringTests(unittest.TestCase):

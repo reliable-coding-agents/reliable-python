@@ -250,7 +250,7 @@ class DiffSelection:
 @dataclass(frozen=True)
 class _SignatureShape:
     positional_count: int
-    required_positional: int
+    required_total: int
     keyword_names: frozenset[str]
     optional_names: frozenset[str]
     required_names: frozenset[str]
@@ -1384,7 +1384,11 @@ def _check_functions(
 def _missing_public_annotations(function: FunctionInfo) -> list[str]:
     node = function.node
     parameters = [*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs]
-    if parameters and parameters[0].arg in {"self", "cls"}:
+    has_receiver = (
+        function.class_name is not None
+        and "staticmethod" not in _method_decorators(node)
+    )
+    if has_receiver and parameters and parameters[0].arg in {"self", "cls"}:
         parameters = parameters[1:]
     missing = [item.arg for item in parameters if item.annotation is None]
     variadics = [item for item in (node.args.vararg, node.args.kwarg) if item is not None]
@@ -1889,9 +1893,11 @@ def _signature_shape(arguments: ast.arguments, method_kind: str) -> _SignatureSh
     optional_names.update(item.arg for item, default in keyword_only if default is not None)
     required_names = {item.arg for item, required in named if required}
     required_names.update(item.arg for item, default in keyword_only if default is None)
+    required_total = sum(required for _, required in [*positional_only, *named])
+    required_total += sum(default is None for _, default in keyword_only)
     return _SignatureShape(
         positional_count=len(positional_only) + len(named),
-        required_positional=sum(required for _, required in [*positional_only, *named]),
+        required_total=required_total,
         keyword_names=frozenset(keyword_names),
         optional_names=frozenset(optional_names),
         required_names=frozenset(required_names),
@@ -1908,15 +1914,13 @@ def _signature_incompatibilities(base: _SignatureShape, override: _SignatureShap
         reasons.append("removes variadic keyword acceptance")
     if not override.has_varargs and override.positional_count < base.positional_count:
         reasons.append("accepts fewer positional arguments")
-    if override.required_positional > base.required_positional:
-        reasons.append("requires more positional arguments")
+    if override.required_total > base.required_total:
+        reasons.append("requires more arguments than the base contract")
     if not override.has_kwargs:
         missing = base.keyword_names - override.keyword_names
         reasons.extend(f"removes accepted keyword {name}" for name in sorted(missing))
     newly_required = base.optional_names & override.required_names
     reasons.extend(f"makes optional parameter {name} required" for name in sorted(newly_required))
-    added_required = override.required_names - base.keyword_names
-    reasons.extend(f"adds required parameter {name}" for name in sorted(added_required))
     return reasons
 
 
