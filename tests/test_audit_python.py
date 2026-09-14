@@ -903,6 +903,14 @@ class HookIntegrationTests(unittest.TestCase):
             self.assertEqual(invalid["decision"], "block")
             self.assertIn("Ignoring invalid", invalid["systemMessage"])
 
+    def test_stop_hook_silently_skips_a_non_git_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            hook_input = json.dumps(
+                {"cwd": directory, "stop_hook_active": False}
+            )
+            payload = self._run_stop_hook(hook_input, {})
+        self.assertEqual(payload, {})
+
     def _run_stop_hook(self, hook_input: str, environment: dict[str, str]) -> dict:
         result = subprocess.run(
             [sys.executable, str(ROOT / "hooks" / "stop_quality_gate.py")],
@@ -991,7 +999,7 @@ class PackageConsistencyTests(unittest.TestCase):
         )
         self.assertEqual(
             {claude["version"], codex["version"], entry["version"]},
-            {"0.3.0"},
+            {"0.3.1"},
         )
 
     def test_session_policy_is_reinjected_after_every_start_mode(self) -> None:
