@@ -81,18 +81,52 @@ principle-oriented checker into an automatic architectural veto. Suppressions
 remain available for direct audits using the existing adjacent
 `# quality: ignore[SOLID03] - rationale` syntax.
 
+## Additional Python practices
+
+Ship a second on-demand `writing-maintainable-python` skill so general Python
+advice is not mislabeled as SOLID. It assigns stable identifiers to the five
+requested practices:
+
+| ID | Practice | Static status in this release |
+|---|---|---|
+| `PY001` | Guard executable module-level code | Bare top-level call expressions |
+| `PY002` | Assemble executable workflows in `main()` | Guidance only |
+| `PY003` | Keep functions small and single-purpose | Existing `POT04`; semantic `SOLID01` review |
+| `PY004` | Annotate public function interfaces | Missing parameter or return annotations |
+| `PY005` | Prefer simple comprehensions for clear projections | Guidance only |
+
+`PY001` reports a warning only for a bare call expression directly in the
+module body. Calls in assignments, decorators, class bodies, function bodies,
+and an `if __name__ == "__main__"` body are not inferred to be import-time
+side effects. Intentional import-time registration can use the existing narrow
+suppression syntax.
+
+`PY004` reports one warning per public function or method with missing
+parameter or return annotations. It exempts `self` and `cls`, private and
+dunder definitions, nested functions, overloads and stubs, and test functions
+using the same public-surface rules as docstring enforcement. It checks only
+annotation presence; a configured type checker remains responsible for type
+correctness.
+
+`PY001` and `PY004` are ordinary high-confidence warnings and retain the
+existing Stop-gate behavior. `PY002` is explicitly organizational guidance,
+and `PY005` recommends comprehensions only for a pure, straightforward
+one-pass map or filter; neither becomes a mechanical style preference.
+
 ## Documentation and packaging
 
-Update the README and repository guidance with the new skill, namespace,
-checker boundary, and non-blocking Stop behavior. Bump the plugin feature
-version from `0.3.1` to `0.4.0` in both host manifests, the Claude marketplace
-manifest, the package-consistency test, and the README badge.
+Update the README and repository guidance with both new skills, the `SOLID*`
+and `PY*` namespaces, checker boundaries, and non-blocking SOLID Stop behavior.
+Bump the plugin feature version from `0.3.1` to `0.4.0` in both host manifests,
+the Claude marketplace manifest, the package-consistency test, and the README
+badge.
 
 ## Verification
 
-Tests must demonstrate the red-green behavior of each supported incompatibility
-and representative compatible overrides. Hook integration tests must show that
-a changed `SOLID03` warning does not block stopping while an existing blocking
-finding still does. Final verification consists of the complete unit suite,
-the explicit self-audit over `hooks`, `tests`, and `skills`, and Claude plugin
-manifest validation.
+Tests must demonstrate the red-green behavior of each supported incompatibility,
+representative compatible overrides, unguarded top-level calls, and public
+annotation gaps. Hook integration tests must show that a changed `SOLID03`
+warning does not block stopping while existing blocking findings—including
+`PY001` and `PY004`—still do. Final verification consists of the complete unit
+suite, the explicit self-audit over `hooks`, `tests`, and `skills`, and Claude
+plugin manifest validation.
