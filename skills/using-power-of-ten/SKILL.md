@@ -63,6 +63,10 @@ restructuring a docstring.
 Before editing, inspect repository guidance and existing validation commands.
 Load `bounded-loops` before implementing retry, polling, pagination,
 convergence, stream-consumption, or other variable-length loops.
+Load `writing-maintainable-python` for entry points, public type contracts,
+function decomposition, or comprehension choices. Load
+`applying-solid-principles` for class hierarchies, protocols, interfaces, or
+dependency boundaries.
 
 While editing:
 

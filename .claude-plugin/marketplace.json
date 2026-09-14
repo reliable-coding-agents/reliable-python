@@ -8,8 +8,8 @@
   "plugins": [
     {
       "name": "reliable-python",
-      "description": "Guide and audit Python changes against NASA/JPL's Power of Ten rules and the Refactoring.Guru code-smell catalog",
-      "version": "0.3.1",
+      "description": "Guide and audit Python changes with Power of Ten, code smells, SOLID, and explicit Python practices",
+      "version": "0.4.0",
       "source": "./",
       "author": {
         "name": "Jiho Han",

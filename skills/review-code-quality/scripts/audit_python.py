@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Audit Python for high-signal Power of Ten and code-smell findings.
+"""Audit Python for high-signal reliability and maintainability findings.
 
 This checker is intentionally dependency-free. It catches mechanically visible
 signals and leaves design-sensitive smells to the companion skill's semantic
@@ -167,7 +167,7 @@ class Finding:
     Attributes
     ----------
     code : str
-        Rule identifier, such as ``"POT02"``, ``"CS14"``, or ``"DOC01"``.
+        Rule identifier, such as ``"POT02"``, ``"SOLID03"``, or ``"PY004"``.
     severity : str
         One of ``"note"``, ``"warning"``, or ``"error"``.
     path : str

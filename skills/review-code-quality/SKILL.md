@@ -1,6 +1,6 @@
 ---
 name: review-code-quality
-description: Audit Python source, diffs, pull requests, or refactors for NASA/JPL Power of Ten violations and actionable Refactoring.Guru code smells. Use when reviewing code quality, validating a completed Python change, investigating maintainability risks, or fixing reliability findings.
+description: Use when auditing Python source, diffs, pull requests, or refactors for reliability, maintainability, SOLID, explicit program structure, or type-contract risks.
 ---
 
 # Review Code Quality
@@ -10,8 +10,10 @@ rule violations from heuristic design smells and avoid speculative findings.
 
 ## Review workflow
 
-1. Read `../using-power-of-ten/references/power-of-ten.md` and
-   `../using-power-of-ten/references/code-smells.md`.
+1. Read `../using-power-of-ten/references/power-of-ten.md`,
+   `../using-power-of-ten/references/code-smells.md`,
+   `../applying-solid-principles/SKILL.md`, and
+   `../writing-maintainable-python/SKILL.md`.
 2. Read repository guidance and identify the requested change, affected public
    behavior, and changed lines. Review the diff first; open surrounding code
    only as needed to prove a finding.
@@ -27,16 +29,21 @@ rule violations from heuristic design smells and avoid speculative findings.
    cases; it does not replace the semantic pass.
 4. Trace the ten rules in order. For Rules 3, 8, and 9, label conclusions as
    Python-profile findings rather than literal C-rule compliance.
-5. Review the touched design against all five smell families. Report a smell
+5. Review `PY001`-`PY005`: import safety, explicit entry-point assembly,
+   function responsibility, public annotations, and comprehension readability.
+6. Review `SOLID01`-`SOLID05` against demonstrated clients, extension points,
+   substitution contracts, interface use, and dependency direction. Treat
+   `SOLID03` checker output as evidence, not proof of the other principles.
+7. Review the touched design against all five smell families. Report a smell
    only when the code shows the catalog's signal and a concrete maintenance or
    correctness cost.
-6. Check the documentation convention on changed public units (`DOC01`-`DOC03`).
+8. Check the documentation convention on changed public units (`DOC01`-`DOC03`).
    Read `../writing-docstrings/SKILL.md` before reporting a docstring finding.
    A summary-only docstring satisfies every supported style and is not a
    finding on its own.
-7. Run the repository's own formatter, linter, type checker, and focused tests.
+9. Run the repository's own formatter, linter, type checker, and focused tests.
    Do not substitute the bundled checker for project validation.
-8. If asked to fix findings, make the smallest behavior-preserving change,
+10. If asked to fix findings, make the smallest behavior-preserving change,
    rerun checks, and re-review the resulting diff.
 
 ## Finding standard

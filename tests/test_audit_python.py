@@ -1079,12 +1079,12 @@ class ReadOnlyWriter(Writer):
             direct_codes = {item["code"] for item in json.loads(direct.stdout)["findings"]}
             hook_input = json.dumps({"cwd": str(root), "stop_hook_active": False})
             advisory_payload = self._run_stop_hook(hook_input, {})
-            target.write_text(incompatible + "\nvalue = eval('1')\n", encoding="utf-8")
+            target.write_text(incompatible + "\nconnect()\n", encoding="utf-8")
             blocking_payload = self._run_stop_hook(hook_input, {})
         self.assertIn("SOLID03", direct_codes)
         self.assertEqual(advisory_payload, {})
         self.assertEqual(blocking_payload["decision"], "block")
-        self.assertIn("POT08", blocking_payload["reason"])
+        self.assertIn("PY001", blocking_payload["reason"])
         self.assertNotIn("SOLID03", blocking_payload["reason"])
 
     def test_stop_hook_honors_the_docstring_style_environment_variable(self) -> None:
@@ -1210,7 +1210,7 @@ class PackageConsistencyTests(unittest.TestCase):
         )
         self.assertEqual(
             {claude["version"], codex["version"], entry["version"]},
-            {"0.3.1"},
+            {"0.4.0"},
         )
 
     def test_session_policy_is_reinjected_after_every_start_mode(self) -> None:

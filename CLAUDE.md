@@ -76,17 +76,19 @@ cannot disagree. **If you add another configurable setting, resolve it in the
 auditor and read it back the same way** rather than parsing configuration twice.
 
 **2. Skills (`skills/*/SKILL.md`).** `using-power-of-ten` is the always-injected
-entry policy; the other three are loaded on demand and can be as long as they
-need to be. Each also carries `agents/openai.yaml`, which is how Codex renders
-it — a new skill needs both files. `references/` under `using-power-of-ten`
-holds the two long documents (`power-of-ten.md`, `code-smells.md`) that the
-review workflow reads but the session never injects.
+entry policy; the focused skills are loaded on demand and can be as long as
+they need to be. Each also carries `agents/openai.yaml`, which is how Codex
+renders it — a new skill needs both files. `applying-solid-principles` owns
+Python SOLID judgment, while `writing-maintainable-python` owns entry-point,
+annotation, function-focus, and comprehension guidance. `references/` under
+`using-power-of-ten` holds the two long documents (`power-of-ten.md`,
+`code-smells.md`) that the review workflow reads but the session never injects.
 
 **3. Checker (`skills/review-code-quality/scripts/audit_python.py`).** One
-dependency-free AST pass, ~1,700 lines. `analyze_source` is the seam worth
+dependency-free AST pass, ~2,500 lines. `analyze_source` is the seam worth
 knowing: it builds a `ReviewContext` (tree, source lines, path, parent map,
-findings list, docstring style) and hands it to ten `_check_*` functions, each
-of which reports through `context.report`. Adding a rule means adding a
+findings list, docstring style) and hands it to focused `_check_*` functions,
+each of which reports through `context.report`. Adding a rule means adding a
 `_check_*` function and one call there.
 
 **Changed-line filtering is what makes the plugin usable.** `collect_git_diff`
@@ -98,7 +100,8 @@ loop still reports the loop.
 
 **4. Stop gate (`hooks/stop_quality_gate.py`).** Runs the checker with
 `--fail-on none`, and returns `{"decision": "block", "reason": ...}` when
-findings remain. It allows the second stop unconditionally when
+blocking findings remain. `SOLID*` findings are advisory and filtered from
+this decision. The hook allows the second stop unconditionally when
 `stop_hook_active` is set — without that the hook would loop forever. Like the
 other hook, it fails open on infrastructure errors.
 
@@ -108,6 +111,8 @@ other hook, it fails open on infrastructure errors.
 |---|---|
 | `POT01`–`POT10` | Power of Ten, Python profile |
 | `CS01`–`CS23` | Refactoring.Guru smells, numbered in catalog order |
+| `SOLID01`–`SOLID05` | Python SOLID review; `SOLID03` has local static checks |
+| `PY001`–`PY005` | Explicit Python practices; `PY001` and `PY004` are static |
 | `DOC01`–`DOC03` | Docstring convention; `DOC01`≈numpydoc `GL08`, `DOC03`≈`PR01` |
 | `QLT001` | Malformed suppression comment |
 | `IO001`, `PARSE001`, `LIMIT001` | Infrastructure, not code-quality, findings |
@@ -130,6 +135,12 @@ which shapes how you write code here:
   default, resolved from `--docstring-style`, then `RELIABLE_PYTHON_DOCSTYLE`,
   then `[tool.reliable-python] docstring-style` in `pyproject.toml`. The checker
   enforces this on itself. See `skills/writing-docstrings/SKILL.md`.
+- **Public function interfaces need annotations.** `PY004` checks presence on
+  parameters and returns; project type tooling remains responsible for
+  correctness.
+- **Bare module-body calls are import-time execution.** Put executable workflow
+  in `main()` under an `if __name__ == "__main__"` guard, or document a narrow
+  intentional registration with `PY001`.
 - **`POT05` anchors its module-wide finding to the file's first function.**
   Adding a function ahead of one that carries a `POT05` suppression moves the
   anchor and re-opens the finding — move the comment with it.
