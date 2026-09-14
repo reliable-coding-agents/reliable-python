@@ -25,6 +25,7 @@ SPEC = importlib.util.spec_from_file_location("audit_python", AUDITOR_PATH)
 assert SPEC is not None and SPEC.loader is not None
 AUDITOR = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = AUDITOR
+# quality: ignore[PY001] - test collection must load the auditor module under test
 SPEC.loader.exec_module(AUDITOR)
 
 
@@ -327,6 +328,191 @@ def new():
                 with self.assertRaisesRegex(AUDITOR.AuditError, "discovered path"):
                     # quality: ignore[CS20] - regression test exercises bounded discovery
                     tuple(AUDITOR._iter_python_files([root]))
+
+
+class SolidPrincipleTests(unittest.TestCase):
+    """Cover high-confidence Python Liskov-substitution findings."""
+
+    def _solid_findings(self, source: str) -> list:
+        return [
+            item
+            for item in AUDITOR.analyze_source(source, pathlib.Path("solid.py"))
+            if item.code == "SOLID03"
+        ]
+
+    def test_reports_concrete_method_disabled_by_subclass(self) -> None:
+        source = """
+class Writer:
+    def write(self, payload: object) -> object:
+        return payload
+
+class ReadOnlyWriter(Writer):
+    def write(self, payload: object) -> object:
+        raise NotImplementedError
+"""
+        findings = self._solid_findings(source)
+        self.assertEqual(len(findings), 1)
+        self.assertIn("NotImplementedError", findings[0].message)
+
+    def test_reports_sync_property_and_signature_incompatibilities(self) -> None:
+        source = """
+class Service:
+    def fetch(self, key, timeout=None):
+        return key
+
+    def dispatch(self, *items, **options):
+        return items
+
+    @property
+    def status(self):
+        return "ready"
+
+class NarrowService(Service):
+    async def fetch(self, key, timeout, region):
+        return key
+
+    def dispatch(self, item):
+        return item
+
+    def status(self):
+        return "ready"
+"""
+        findings = self._solid_findings(source)
+        self.assertEqual(len(findings), 3)
+        message = "\n".join(item.message for item in findings)
+        self.assertIn("synchronous", message)
+        self.assertIn("property", message)
+        self.assertIn("variadic", message)
+        self.assertIn("requires more arguments", message)
+
+    def test_reports_removed_accepted_keyword_and_positional_calls(self) -> None:
+        source = """
+class Parser:
+    def parse(self, source, mode="strict", *, encoding="utf-8"):
+        return source
+
+class NarrowParser(Parser):
+    def parse(self, source, *, mode="strict"):
+        return source
+"""
+        findings = self._solid_findings(source)
+        self.assertEqual(len(findings), 1)
+        self.assertIn("positional", findings[0].message)
+        self.assertIn("keyword encoding", findings[0].message)
+
+    def test_accepts_compatible_and_abstract_overrides(self) -> None:
+        source = """
+from abc import abstractmethod
+
+class Service:
+    @abstractmethod
+    def required(self, key):
+        raise NotImplementedError
+
+    def stub(self, key): ...
+
+    def fetch(self, key, timeout=None):
+        return key
+
+    def select(self, *, key):
+        return key
+
+    def locate(self, key, /):
+        return key
+
+    def _internal(self):
+        return None
+
+class WideService(Service):
+    def required(self, key):
+        return key
+
+    def stub(self, key):
+        return key
+
+    def fetch(self, key, timeout=None, *args, **kwargs):
+        return key
+
+    def select(self, key):
+        return key
+
+    def locate(self, key):
+        return key
+
+    def _internal(self):
+        raise NotImplementedError
+
+class ExternalService(ExternalBase):
+    def fetch(self, key):
+        return key
+"""
+        self.assertEqual(self._solid_findings(source), [])
+
+
+class PythonPracticeTests(unittest.TestCase):
+    """Cover high-confidence maintainable-Python practices."""
+
+    def test_reports_bare_module_call_but_accepts_main_guard(self) -> None:
+        unsafe = "def connect():\n    return None\n\nconnect()\n"
+        safe = (
+            "def main() -> None:\n    connect()\n\n"
+            "if __name__ == '__main__':\n    main()\n"
+        )
+        self.assertIn("PY001", codes(unsafe))
+        self.assertNotIn("PY001", codes(safe))
+
+    def test_reports_missing_public_interface_annotations(self) -> None:
+        source = """
+def transform(value: str, limit=10):
+    return value[:limit]
+
+class Formatter:
+    def render(self, value: str):
+        return value
+"""
+        findings = AUDITOR.analyze_source(source, pathlib.Path("typed.py"))
+        messages = [item.message for item in findings if item.code == "PY004"]
+        self.assertEqual(len(messages), 2)
+        self.assertTrue(
+            any("limit" in message and "return" in message for message in messages)
+        )
+
+    def test_accepts_complete_annotations_and_exempt_surfaces(self) -> None:
+        source = """
+from typing import overload
+
+def transform(value: str, limit: int = 10) -> str:
+    return value[:limit]
+
+def _helper(value):
+    return value
+
+@overload
+def parse(value): ...
+
+class Formatter:
+    def render(self, value: str) -> str:
+        return value
+
+    def __repr__(self):
+        return "Formatter()"
+"""
+        self.assertNotIn("PY004", codes(source))
+
+    def test_requires_annotation_for_non_receiver_named_self(self) -> None:
+        source = """
+def transform(self) -> str:
+    return str(self)
+
+class Formatter:
+    @staticmethod
+    def render(self) -> str:
+        return str(self)
+"""
+        findings = AUDITOR.analyze_source(source, pathlib.Path("receivers.py"))
+        messages = [item.message for item in findings if item.code == "PY004"]
+        self.assertEqual(len(messages), 2)
+        self.assertTrue(all("self" in message for message in messages))
 
 
 class DocstringTests(unittest.TestCase):
@@ -876,6 +1062,58 @@ class HookIntegrationTests(unittest.TestCase):
             self.assertEqual(payload["decision"], "block")
             self.assertIn("POT08", payload["reason"])
 
+    def test_stop_hook_treats_solid_findings_as_advisory(self) -> None:
+        baseline = '''"""Module."""
+
+class Writer:
+    """Write payloads."""
+
+    def write(self, payload: object) -> object:
+        """Return the written payload."""
+        return payload
+
+class ReadOnlyWriter(Writer):
+    """Represent a restricted writer."""
+
+    def write(self, payload: object) -> object:
+        """Return the written payload."""
+        return payload
+'''
+        prefix, suffix = baseline.rsplit("        return payload\n", 1)
+        incompatible = prefix + "        raise NotImplementedError\n" + suffix
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            subprocess.run(
+                ["git", "config", "user.email", "test@example.com"],
+                cwd=root,
+                check=True,
+            )
+            subprocess.run(["git", "config", "user.name", "Test"], cwd=root, check=True)
+            target = root / "sample.py"
+            target.write_text(baseline, encoding="utf-8")
+            subprocess.run(["git", "add", "sample.py"], cwd=root, check=True)
+            subprocess.run(["git", "commit", "-qm", "baseline"], cwd=root, check=True)
+            target.write_text(incompatible, encoding="utf-8")
+            direct = subprocess.run(
+                [sys.executable, str(AUDITOR_PATH), "--git-diff", "--format", "json",
+                 "--fail-on", "none"],
+                cwd=root,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            direct_codes = {item["code"] for item in json.loads(direct.stdout)["findings"]}
+            hook_input = json.dumps({"cwd": str(root), "stop_hook_active": False})
+            advisory_payload = self._run_stop_hook(hook_input, {})
+            target.write_text(incompatible + "\nconnect()\n", encoding="utf-8")
+            blocking_payload = self._run_stop_hook(hook_input, {})
+        self.assertIn("SOLID03", direct_codes)
+        self.assertEqual(advisory_payload, {})
+        self.assertEqual(blocking_payload["decision"], "block")
+        self.assertIn("PY001", blocking_payload["reason"])
+        self.assertNotIn("SOLID03", blocking_payload["reason"])
+
     def test_stop_hook_honors_the_docstring_style_environment_variable(self) -> None:
         google_source = (
             '"""Module."""\n\n\ndef public(value):\n'
@@ -999,7 +1237,7 @@ class PackageConsistencyTests(unittest.TestCase):
         )
         self.assertEqual(
             {claude["version"], codex["version"], entry["version"]},
-            {"0.3.1"},
+            {"0.4.0"},
         )
 
     def test_session_policy_is_reinjected_after_every_start_mode(self) -> None:

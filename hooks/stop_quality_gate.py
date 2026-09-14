@@ -24,6 +24,7 @@ VALID_DOCSTRING_STYLES = frozenset({"numpy", "google", "rest", "any"})
 DEFAULT_DOCSTRING_STYLE = "numpy"
 DOCSTYLE_ENV_VAR = "RELIABLE_PYTHON_DOCSTYLE"
 NON_GIT_ERROR = "quality audit: --git-diff requires a Git working tree"
+ADVISORY_CODE_PREFIXES = ("SOLID",)
 
 
 # quality: ignore[POT05] - module checks JSON, enum, process, timeout, and payload boundaries
@@ -107,9 +108,14 @@ def _run_audit(
 def _selected_findings(payload: dict[str, Any], gate_level: str) -> list[dict[str, Any]]:
     raw = payload.get("findings", [])
     findings = [item for item in raw if isinstance(item, dict)]
+    blocking = [
+        item
+        for item in findings
+        if not str(item.get("code", "")).startswith(ADVISORY_CODE_PREFIXES)
+    ]
     if gate_level == "errors":
-        return [item for item in findings if item.get("severity") == "error"]
-    return findings
+        return [item for item in blocking if item.get("severity") == "error"]
+    return blocking
 
 
 def _reason(findings: list[dict[str, Any]]) -> str:

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Write Maintainable Python"
+  short_description: "Use explicit, readable Python program structure"
+  default_prompt: "Use $writing-maintainable-python to improve this Python code's structure and explicitness."

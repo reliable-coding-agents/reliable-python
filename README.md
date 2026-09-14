@@ -1,19 +1,23 @@
 # Reliable Python
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.3.1-informational.svg)](.claude-plugin/plugin.json)
+[![Version](https://img.shields.io/badge/version-0.4.0-informational.svg)](.claude-plugin/plugin.json)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![Dependencies](https://img.shields.io/badge/dependencies-none-brightgreen.svg)](skills/review-code-quality/scripts/audit_python.py)
 
 A shared Codex and Claude Code plugin that holds your coding agent to strict
 Python reliability rules — and checks whether it actually followed them.
 
-It combines three bodies of guidance:
+It combines five bodies of guidance:
 
 - Gerard Holzmann's [Power of Ten](https://spinroot.com/gerard/pdf/P10.pdf)
   rules, translated into an explicitly labeled Python profile
 - the 23 smells in the
   [Refactoring.Guru catalog](https://refactoring.guru/ko/refactoring/smells)
+- the five [SOLID](https://en.wikipedia.org/wiki/SOLID) design principles,
+  applied to Python boundaries without pretending they are fully mechanical
+- explicit Python practices for safe imports, typed entry points, focused
+  functions, public annotations, and readable comprehensions
 - a documentation convention defaulting to
   [NumPy-style docstrings](https://numpydoc.readthedocs.io/en/latest/format.html)
 
@@ -62,9 +66,11 @@ demo.py:6: warning DOC01: public function wait_for_job has no docstring
   remedy: Add a NumPy-style docstring, or make the name private if it is not part of the public surface.
 demo.py:6: warning POT05: defensive-check density is 0.00 per function (target average: 2.00)
   remedy: Add meaningful boundary checks or document why trivial functions need none.
+demo.py:6: warning PY004: public function wait_for_job lacks type annotations for api, job_id, return
+  remedy: Annotate every public parameter and return value, then run the project's configured type checker.
 demo.py:7: error POT02: while loop has no mechanically visible preset upper bound
   remedy: Use a named maximum and fail explicitly when it is exhausted.
-quality audit: 1 error(s), 2 warning(s)
+quality audit: 1 error(s), 3 warning(s)
 ```
 
 Outside a Git working tree, the global completion hook exits silently because
@@ -77,7 +83,7 @@ POLL_INTERVAL_S = 5
 MAX_POLLS = 120  # 120 x 5s = 10 minute ceiling
 
 
-def wait_for_job(api, job_id):
+def wait_for_job(api: BatchClient, job_id: str) -> Result:
     """Block until a job finishes, or fail at a known time.
 
     Parameters
@@ -113,10 +119,11 @@ def wait_for_job(api, job_id):
     )
 ```
 
-That version audits clean. Three things changed, one per finding: the ceiling is
+That version audits clean. Four things changed, one per finding: the ceiling is
 named and computable so a reader knows the worst case without arithmetic, the
 guards satisfy the assertion-density rule at the boundary where inputs are
-untrusted, and the error message says which job and how long.
+untrusted, the public call contract is explicit, and the error message says
+which job and how long.
 
 The bound doesn't make the code correct. It makes the failure loud and fast
 instead of silent and infinite.
@@ -129,10 +136,11 @@ The same `skills/` and `hooks/` directories are loaded by both hosts.
    resume, clear, and compaction — so the rules are in context whether or not
    the agent chooses to read a skill.
 2. The `using-power-of-ten` skill guides implementation continuously.
-3. The `review-code-quality` skill performs an evidence-based semantic review
-   across all ten rules and all five smell families.
-4. Its dependency-free AST checker audits changed Python lines.
-5. A `Stop` hook asks the agent for one more pass when the checker reports a
+3. Focused skills guide SOLID decisions and explicit Python program structure.
+4. The `review-code-quality` skill performs an evidence-based semantic review
+   across the reliability rules, Python practices, SOLID, and smell families.
+5. Its dependency-free AST checker audits changed Python lines.
+6. A `Stop` hook asks the agent for one more pass when the checker reports a
    changed-scope finding. It then allows a second stop to prevent a hook loop.
 
 Only changed lines are reported, so adopting the plugin mid-project does not
@@ -148,6 +156,8 @@ bury you in findings about code you did not touch.
 | **bounded-loops** | On demand | Rule 2 in depth — retries, polling, pagination, convergence, stream consumption |
 | **limiting-nesting** | On demand | Rule 1 in depth — keeping block depth at four levels or fewer |
 | **writing-docstrings** | On demand | NumPy-default documentation convention, with Google and reST as alternates |
+| **writing-maintainable-python** | On demand | Safe entry points, public annotations, focused functions, and readable comprehensions |
+| **applying-solid-principles** | On demand | Evidence-based Python review of all five SOLID principles |
 | **review-code-quality** | On demand | Structured audit workflow and the bundled static checker |
 
 The entry skill is injected into every session, so it is kept under a hard
@@ -160,6 +170,8 @@ The entry skill is injected into every session, so it is kept under a hard
 |---|---|
 | `POT01`–`POT10` | Power of Ten, Python profile — see [references/power-of-ten.md](skills/using-power-of-ten/references/power-of-ten.md) |
 | `CS01`–`CS23` | Refactoring.Guru smells in catalog order — see [references/code-smells.md](skills/using-power-of-ten/references/code-smells.md); `CS01` also covers [nesting depth](#nesting-depth) |
+| `SOLID01`–`SOLID05` | SOLID principles; only high-confidence local `SOLID03` substitution checks are mechanical |
+| `PY001`–`PY005` | Explicit Python practices; `PY001` and `PY004` are mechanical |
 | `DOC01`–`DOC03` | Docstring convention — see [Docstrings](#docstrings) |
 
 The checker recognizes high-signal cases including recursive call cycles,
@@ -168,12 +180,35 @@ low defensive-check density, mutable defaults, broad swallowed exceptions,
 dynamic execution, deep attribute chains, long parameter lists, unreachable
 code, data clumps, duplicate function bodies, several class-level smells,
 blocks nested more than four levels deep, and undocumented or inconsistently
-documented public definitions.
+documented public definitions. It also detects bare module-body calls,
+incomplete public annotations, and incompatible overrides of local base
+classes.
 
 Design-sensitive smells — divergent change, shotgun surgery, speculative
 generality — stay a semantic review responsibility. No static checker can
 confirm them, and the skill is explicit that a smell needs a demonstrated cost
 before it becomes a finding.
+
+## SOLID and Python practices
+
+All five SOLID principles are review vocabulary, but only `SOLID03` currently
+has static checks. Within one module, the checker compares public methods on a
+subclass and a directly named local base. It reports disabled concrete methods,
+method/property or sync/async changes, and signatures that reject calls the
+base accepts. It does not import code, infer types, or claim to verify semantic
+invariants.
+
+`PY001` reports a bare call expression directly in a module body because it
+runs during import. `PY004` reports missing annotations on public parameters or
+returns; it checks presence, while mypy, pyright, or the project's configured
+checker remains responsible for correctness. `PY002`, `PY003`, and `PY005`
+guide explicit `main()` assembly, single-purpose functions, and simple
+comprehensions without imposing style-only heuristics.
+
+SOLID findings are visible in direct audits but never block the Stop hook.
+`PY001` and `PY004` are ordinary warnings and follow
+`RELIABLE_PYTHON_GATE`. This asymmetry is deliberate: substitution evidence is
+useful during review, while an AST cannot adjudicate architecture.
 
 ## Nesting depth
 
@@ -240,6 +275,7 @@ python3 skills/review-code-quality/scripts/audit_python.py src tests
 
 Set the environment variables before launching the host. `RELIABLE_PYTHON_GATE=off`
 disables the completion gate while keeping skills and session guidance active.
+`SOLID*` findings remain advisory at every gate level.
 
 ### Choosing a docstring convention
 
@@ -312,6 +348,8 @@ skills/
   bounded-loops/            # focused Rule 2 workflow
   limiting-nesting/         # focused Rule 1 nesting-depth workflow
   writing-docstrings/       # NumPy-default documentation convention
+  writing-maintainable-python/ # explicit Python structure and typing
+  applying-solid-principles/   # Python-specific SOLID review guidance
   review-code-quality/      # audit workflow and static checker
 tests/
   test_audit_python.py

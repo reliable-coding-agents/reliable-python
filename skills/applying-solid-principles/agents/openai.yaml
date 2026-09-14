@@ -1,0 +1,4 @@
+interface:
+  display_name: "Apply Python SOLID"
+  short_description: "Review Python boundaries with SOLID principles"
+  default_prompt: "Use $applying-solid-principles to review this Python design for concrete SOLID risks."
